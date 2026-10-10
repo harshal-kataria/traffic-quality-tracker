@@ -8,6 +8,8 @@
 var payment = new URLSearchParams(location.search).get('payment') || 'prepaid';
 document.getElementById('payment').value = payment;
 window.storeTrackerOrder = { orderValue: 1499, productNames: ['Traveler Backpack'], paymentMethod: payment };
+var orderId = new URLSearchParams(location.search).get('orderId');
+if (orderId) window.storeTrackerOrder.orderId = orderId;
 </script>
 <script src="/tracker.js" data-convex-url="__CONVEX_URL__"></script>
 <script>StoreTracker.orderReady.then(() => { document.getElementById('status').textContent = payment + ' order saved. Session: ' + StoreTracker.sessionId; }).catch(e => { document.getElementById('status').textContent = e.message; });</script>

@@ -20,6 +20,7 @@ export const visit = mutation({
 
 export const order = mutation({
   args: {
+    orderId: v.optional(v.string()),
     sessionId: v.string(), orderValue: v.number(), productNames: v.array(v.string()),
     paymentMethod: v.union(v.literal("prepaid"), v.literal("COD")), time: v.number(),
   },
@@ -28,7 +29,24 @@ export const order = mutation({
     if (!args.sessionId || !Number.isFinite(args.orderValue) || args.orderValue < 0 ||
         !Number.isFinite(args.time) || !args.productNames.length ||
         args.productNames.some((name) => !name.trim())) throw new Error("Invalid order");
-    return await ctx.db.insert("orders", args);
+    const orderId = args.orderId?.trim();
+    if (orderId) {
+      const existing = await ctx.db.query("orders")
+        .withIndex("by_order_id", q => q.eq("orderId", orderId)).first();
+      if (existing) return existing._id;
+    } else {
+      // Use database arrival time, not the browser clock. The window starts
+      // at the first saved order; suppressed reloads do not extend it.
+      const products = JSON.stringify([...args.productNames].sort());
+      const recent = ctx.db.query("orders").withIndex("by_session_value", q =>
+        q.eq("sessionId", args.sessionId).eq("orderValue", args.orderValue)
+          .gte("_creationTime", Date.now() - 10 * 60 * 1000));
+      for await (const existing of recent) {
+        if (JSON.stringify([...existing.productNames].sort()) === products) return existing._id;
+      }
+    }
+    const { orderId: _providedId, ...fields } = args;
+    return await ctx.db.insert("orders", orderId ? { ...fields, orderId } : fields);
   },
 });
 

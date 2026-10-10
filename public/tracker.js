@@ -46,10 +46,12 @@
     sessionId: visit.sessionId,
     trackOrder: async function (order) {
       await ready;
-      return send("order", {
+      var payload = {
         sessionId: session(), orderValue: order.orderValue,
         productNames: order.productNames, paymentMethod: order.paymentMethod, time: Date.now(),
-      });
+      };
+      if (typeof order.orderId === "string" && order.orderId.trim()) payload.orderId = order.orderId.trim();
+      return send("order", payload);
     },
   };
   if (window.storeTrackerOrder) {

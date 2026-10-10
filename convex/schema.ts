@@ -12,10 +12,13 @@ export default defineSchema({
     time: v.number(),
   }).index("by_session", ["sessionId"]),
   orders: defineTable({
+    orderId: v.optional(v.string()),
     sessionId: v.string(),
     orderValue: v.number(),
     productNames: v.array(v.string()),
     paymentMethod: v.union(v.literal("prepaid"), v.literal("COD")),
     time: v.number(),
-  }).index("by_session", ["sessionId"]),
+  }).index("by_session", ["sessionId"])
+    .index("by_order_id", ["orderId"])
+    .index("by_session_value", ["sessionId", "orderValue"]),
 });
