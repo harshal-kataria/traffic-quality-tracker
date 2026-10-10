@@ -28,3 +28,10 @@ const founder = path.join(output, 'founder');
 fs.mkdirSync(founder, { recursive: true });
 for (const file of ['index.html', 'screen.css']) fs.copyFileSync(path.join(root,'founder',file),path.join(founder,file));
 require('esbuild').buildSync({ entryPoints:[path.join(root,'founder/screen.jsx')], bundle:true, minify:true, outfile:path.join(founder,'screen.js'), define:{'process.env.FOUNDER_CONVEX_URL':JSON.stringify(url),'process.env.NODE_ENV':'"production"'}, jsx:'automatic' });
+// Version the founder assets so returning browsers load the current screen.
+let founderHtml = fs.readFileSync(path.join(founder, 'index.html'), 'utf8');
+for (const file of ['screen.js', 'screen.css']) {
+  const version = require('node:crypto').createHash('sha256').update(fs.readFileSync(path.join(founder, file))).digest('hex').slice(0, 12);
+  founderHtml = founderHtml.replace(`/founder/${file}`, `/founder/${file}?v=${version}`);
+}
+fs.writeFileSync(path.join(founder, 'index.html'), founderHtml);
