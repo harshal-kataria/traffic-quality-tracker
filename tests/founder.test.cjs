@@ -6,9 +6,23 @@ const path = require('node:path');
 const output = buildSync({entryPoints:['convex/founderMath.ts'],bundle:true,platform:'node',format:'cjs',write:false}).outputFiles[0].text;
 const compiled = new Module(path.resolve('convex/founderMath.ts'),module);
 compiled._compile(output,path.resolve('convex/founderMath.ts'));
-const {summarize} = compiled.exports;
+const {summarize,summarizeSessions} = compiled.exports;
 const visit = (source,eventName='page_view',pageUrl='https://store.test/chasma-kart/product/sunset-club.html') => ({source,eventName,pageUrl});
 const order = overrides => ({productNames:['Sunset Club'],items:[{name:'Sunset Club',pricePaise:134910,quantity:1}],currency:'INR',source:'instagram',orderValue:134910,status:'paid',...overrides});
+
+test('source rates use unique sessions and visible time, excluding test purchases', () => {
+  const sessions = ['a','b','c'].map((sessionId,i) => ({sessionId,source:'Instagram',startedAt:i,visibleTimeMs:(i+1)*60000}));
+  const visits = [{sessionId:'a',eventName:'add_to_cart'},{sessionId:'a',eventName:'add_to_cart'},{sessionId:'a',eventName:'begin_checkout'},{sessionId:'b',eventName:'add_to_cart'}];
+  const orders = [order({sessionId:'a'}),order({sessionId:'a'}),order({sessionId:'b',isTest:true}),order({sessionId:'c',status:'refunded'})];
+  const result = summarizeSessions(sessions,visits,orders);
+  const row = result.sourceRows[0];
+  assert.equal(row.sessions,3); assert.equal(row.averageTimeMs,120000);
+  assert.equal(row.cartSessions,2); assert.equal(row.checkoutSessions,1);
+  assert.equal(row.purchasingSessions,1); assert.equal(row.addToCartRate,2/3);
+  assert.equal(row.purchaseRate,1/3); assert.equal(row.cartToPurchaseRate,1/2);
+  assert.equal(result.sessionRows.find(row => row.sessionId === 'b').purchased,false);
+  assert.equal(summarizeSessions([{...sessions[0],source:'direct'}],[],[]).sourceRows[0].cartToPurchaseRate,null);
+});
 
 test('product/source totals count only page views and exclude every test/staff flag, cancellations and refunds', () => {
   const orders = [order({}),order({isTest:true}),order({isStaff:true}),order({excludedFromMetrics:true}),order({status:'cancelled'}),order({status:'refunded'})];

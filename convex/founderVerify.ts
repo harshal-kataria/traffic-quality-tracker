@@ -27,8 +27,10 @@ export const run = internalAction({ args: {}, returns: v.any(), handler: async (
   const before = select((await ctx.runQuery(internal.founder.preview,{storeId:"chasma-kart"})).rows);
   let after;
   let savedOrder;
+  let sessionMetrics;
   try {
     await ctx.runMutation(api.tracking.visit,{...context,eventId:crypto.randomUUID(),eventName:"page_view",pageUrl:"https://store.test/chasma-kart/product/sunset-club.html"});
+    for (const eventName of ["add_to_cart", "add_to_cart", "begin_checkout"] as const) await ctx.runMutation(api.tracking.visit,{...context,eventId:crypto.randomUUID(),eventName,pageUrl:"https://store.test/chasma-kart/product/sunset-club.html"});
     const args = {...context,eventId:crypto.randomUUID(),orderId:unique,orderValue:149900,currency:"INR",items:[{name:"Sunset Club",quantity:1,pricePaise:149900}],paymentMethod:"prepaid" as const,couponCode:null,isTest:false,isStaff:false};
     const id = await ctx.runMutation(api.tracking.order,args);
     const replay = await ctx.runMutation(api.tracking.order,{...args,eventId:crypto.randomUUID()});
@@ -36,6 +38,9 @@ export const run = internalAction({ args: {}, returns: v.any(), handler: async (
     after = select((await ctx.runQuery(internal.founder.preview,{storeId:"chasma-kart"})).rows);
     const raw = await ctx.runQuery(internal.tracking.rowsForSession,{storeId:"chasma-kart",sessionId:unique});
     savedOrder = raw.orders[0];
+    const report = await ctx.runQuery(internal.founder.preview,{storeId:"chasma-kart"});
+    sessionMetrics = report.sessionRows.find(row => row.sessionId === unique);
+    if (!sessionMetrics?.addedToCart || !sessionMetrics.beganCheckout || !sessionMetrics.purchased || sessionMetrics.visibleTimeMs !== raw.sessions[0].visibleTimeMs) throw new Error("Session time or funnel totals failed");
     if (raw.orders.length !== 1 || savedOrder.isTest || savedOrder.excludedFromMetrics || after.visits !== before.visits+1 || after.orders !== before.orders+1 || after.orderValuePaise !== before.orderValuePaise+149900) throw new Error("Non-test order totals did not increase correctly");
   } finally {
     await ctx.runMutation(internal.founderVerify.cleanup,{sessionId:unique,visitorId:unique});
@@ -43,5 +48,5 @@ export const run = internalAction({ args: {}, returns: v.any(), handler: async (
   const cleaned = select((await ctx.runQuery(internal.founder.preview,{storeId:"chasma-kart"})).rows);
   const remaining = await ctx.runQuery(internal.tracking.rowsForSession,{storeId:"chasma-kart",sessionId:unique});
   if (remaining.orders.length || remaining.visits.length || remaining.sessions.length || JSON.stringify(cleaned) !== JSON.stringify(before)) throw new Error("Verification cleanup failed");
-  return {before,after,cleaned,savedOrder,duplicateSavedOnce:true,verificationRowsRemoved:true};
+  return {before,after,cleaned,savedOrder,sessionMetrics,duplicateSavedOnce:true,verificationRowsRemoved:true};
 }});

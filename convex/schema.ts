@@ -32,7 +32,7 @@ export default defineSchema({
   sessions: defineTable({ storeId: v.string(), sessionId: v.string(), startedAt: v.number(), sessionDay: v.string(),
     lastSeenAt: v.number(), visibleTimeMs: v.number(), lastHeartbeatAt: v.number(), source: v.string(),
     attribution: v.union(attribution, v.null()),
-  }).index("by_store_session", ["storeId", "sessionId"]),
+  }).index("by_store_session", ["storeId", "sessionId"]).index("by_store_started", ["storeId", "startedAt"]),
   heartbeatReceipts: defineTable({ storeId: v.string(), eventId: v.string(), time: v.number() })
     .index("by_store_event", ["storeId", "eventId"]).index("by_time", ["time"]),
   visitors: defineTable({ storeId: v.string(), visitorId: v.string(), attribution: v.union(attribution, v.null()) })

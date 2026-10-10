@@ -2,9 +2,12 @@ import { query, internalQuery, internalAction, internalMutation, type QueryCtx }
 import { internal } from "./_generated/api";
 import { v } from "convex/values";
 import { createAccount, getAuthUserId } from "@convex-dev/auth/server";
-import { summarize } from "./founderMath";
+import { summarize, summarizeSessions } from "./founderMath";
 
-const result = v.object({ storeId: v.string(), from: v.number(), until: v.number(), excludedOrders: v.number(), rows: v.array(v.object({ product: v.string(), source: v.string(), visits: v.number(), orders: v.number(), orderValuePaise: v.number(), currency: v.string() })) });
+const result = v.object({ storeId: v.string(), from: v.number(), until: v.number(), excludedOrders: v.number(), rows: v.array(v.object({ product: v.string(), source: v.string(), visits: v.number(), orders: v.number(), orderValuePaise: v.number(), currency: v.string() })),
+  sourceRows: v.array(v.object({ source: v.string(), sessions: v.number(), visibleTimeMs: v.number(), cartSessions: v.number(), checkoutSessions: v.number(), purchasingSessions: v.number(), cartPurchasingSessions: v.number(), averageTimeMs: v.number(), addToCartRate: v.number(), purchaseRate: v.number(), cartToPurchaseRate: v.union(v.number(), v.null()) })),
+  sessionRows: v.array(v.object({ sessionId: v.string(), source: v.string(), startedAt: v.number(), visibleTimeMs: v.number(), purchased: v.boolean(), addedToCart: v.boolean(), beganCheckout: v.boolean() })),
+});
 async function report(ctx: QueryCtx, storeId: string) {
   const until = Date.now();
   const from = until - 30 * 86400000;
@@ -13,8 +16,9 @@ async function report(ctx: QueryCtx, storeId: string) {
   // in its index dependency, otherwise live visits and orders cannot invalidate it.
   const visits = await ctx.db.query("visits").withIndex("by_store_time", q => q.eq("storeId", storeId).gte("time", from)).take(10001);
   const orders = await ctx.db.query("orders").withIndex("by_store_time", q => q.eq("storeId", storeId).gte("time", from)).take(10001);
-  if (visits.length > 10000 || orders.length > 10000) throw new Error("This store exceeds the current report limit. No partial totals are shown.");
-  return { storeId, from, until, ...summarize(visits, orders) };
+  const sessions = await ctx.db.query("sessions").withIndex("by_store_started", q => q.eq("storeId", storeId).gte("startedAt", from)).take(10001);
+  if (visits.length > 10000 || orders.length > 10000 || sessions.length > 10000) throw new Error("This store exceeds the current report limit. No partial totals are shown.");
+  return { storeId, from, until, ...summarize(visits, orders), ...summarizeSessions(sessions, visits, orders) };
 }
 export const productsBySource = query({ args: {}, returns: result,
   handler: async ctx => {
