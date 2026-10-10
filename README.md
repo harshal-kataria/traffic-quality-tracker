@@ -4,6 +4,14 @@ Run `npm run dev:backend` and `npm run dev` in separate terminals. This uses
 an isolated local Convex project in `.local-convex/`; the existing cloud
 `.env.local` is untouched. No deployment is needed.
 
+## Publish with Convex
+
+Run `npm run deploy` to build the pages, deploy the Convex backend, and upload
+the static files to the production `.convex.site` address. Git pushes do not
+deploy. The build command receives the public production Convex client URL;
+credentials remain in your local environment and are never included in the site.
+Hosted example orders are flagged as tests under `demo-store`.
+
 Local pages: http://127.0.0.1:8080/test.html and
 http://127.0.0.1:8080/thank-you.html?payment=COD. Localhost orders are flagged
 as tests automatically. Add `&orderId=YOUR_ORDER_ID` to test order-ID protection.
