@@ -1,61 +1,226 @@
 (function () {
   "use strict";
   if (window.StoreTracker) return;
-  var script = document.currentScript;
-  var endpoint = script && script.dataset.convexUrl;
-  var key = "store-tracker-session";
-  var ttl = 30 * 60 * 1000;
-  var memorySession;
-
-  function session() {
-    var now = Date.now();
-    var saved = memorySession;
-    try { saved = JSON.parse(localStorage.getItem(key)) || saved; } catch (_) {}
-    if (!saved || typeof saved.id !== "string" || !saved.id ||
-        !Number.isFinite(saved.expiresAt) || saved.expiresAt <= now) {
-      saved = { id: crypto.randomUUID(), expiresAt: now + ttl };
+  var noop = function () { return Promise.resolve(null); };
+  var disabled = { ready: Promise.resolve(null), trackOrder: noop, trackEvent: noop, decorateCheckoutUrl: function (url) { return url; }, sessionId: null };
+  try {
+    var script = document.currentScript;
+    var settings = script ? script.dataset : {};
+    var endpoint = settings.convexUrl;
+    var storeId = settings.storeId || (/^(localhost|127\.0\.0\.1)$/.test(location.hostname) ? "local-test-store" : null);
+    var prefix = "store-tracker:" + storeId + ":";
+    var ua = navigator.userAgent || "";
+    var gateway = /razorpay|phonepe|paytm|paypal|stripe|cashfree|payu|juspay/i;
+    var checkoutHosts = (settings.checkoutHosts || "").split(",").map(function (host) { return host.trim().toLowerCase(); }).filter(Boolean);
+    var storeHosts = (settings.storeHosts || location.hostname).split(",").map(function (host) { return host.trim().toLowerCase(); });
+    var initialParams = new URL(location.href).searchParams;
+    function read(key) { try { return JSON.parse(localStorage.getItem(prefix + key)); } catch (_) { return null; } }
+    function write(key, value) { try { localStorage.setItem(prefix + key, JSON.stringify(value)); } catch (_) {} }
+    if (initialParams.get("notrack") === "1") write("disabled", true);
+    if (!endpoint || !storeId || read("disabled") || initialParams.get("notrack") === "1" || /bot\b|crawler|spider|headless|lighthouse|facebookexternalhit|preview|slurp/i.test(ua)) {
+      window.StoreTracker = disabled; return;
     }
-    saved.expiresAt = now + ttl;
-    memorySession = saved;
-    try { localStorage.setItem(key, JSON.stringify(saved)); } catch (_) {}
-    return saved.id;
-  }
-
-  async function send(name, args) {
-    if (!endpoint) throw new Error("Set data-convex-url on the tracking script");
-    var response = await fetch(endpoint.replace(/\/$/, "") + "/api/mutation", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ path: "tracking:" + name, args: args, format: "json" }),
-      keepalive: true,
+    var browser = /Instagram/i.test(ua) ? "instagram_app" : /FBAN|FBAV|FB_IAB/i.test(ua) ? "facebook_app" : "browser";
+    var memorySession;
+    var visitorId = read("visitor") || crypto.randomUUID();
+    var handedSession = initialParams.get("st_sid");
+    var handedVisitor = initialParams.get("st_vid");
+    var handedStore = initialParams.get("st_store");
+    if (handedStore === storeId && /^[\w-]{1,100}$/.test(handedVisitor || "")) visitorId = handedVisitor;
+    write("visitor", visitorId);
+    function normalize(value) {
+      var result = (value || "").trim().toLowerCase().slice(0, 200);
+      return /[^\s@]+@[^\s@]+\.[^\s@]+|\+?\d[\d ().-]{6,}\d/.test(result) ? null : result || null;
+    }
+    function cleanUrl(value) {
+      var url = new URL(value, location.href);
+      url.username = ""; url.password = ""; url.hash = "";
+      url.pathname = decodeURIComponent(url.pathname).replace(/[^/\s@]+@[^/\s@]+\.[^/\s@]+|\+?\d[\d ().-]{6,}\d/g, "redacted");
+      var params = new URLSearchParams();
+      ["utm_source", "utm_medium", "utm_campaign", "utm_content"].forEach(function (key) {
+        var value = normalize(url.searchParams.get(key)); if (value) params.set(key, value);
+      });
+      url.search = params.toString(); return url.href;
+    }
+    function incoming() {
+      var params = new URL(location.href).searchParams;
+      var source = normalize(params.get("utm_source"));
+      var medium = normalize(params.get("utm_medium"));
+      if (!source && params.has("fbclid")) { source = browser === "instagram_app" ? "instagram" : "facebook"; medium = medium || "paid_social"; }
+      if (!source && params.has("gclid")) { source = "google"; medium = medium || "cpc"; }
+      if (!source && browser !== "browser") source = browser;
+      if (!source && document.referrer) {
+        try {
+          var host = new URL(document.referrer).hostname.toLowerCase();
+          if (storeHosts.indexOf(host) < 0 && checkoutHosts.indexOf(host) < 0 && !gateway.test(host)) {
+            source = /(^|\.)instagram\.com$/.test(host) ? "instagram" : /(^|\.)facebook\.com$/.test(host) ? "facebook" : /(^|\.)google\.[a-z.]+$/.test(host) ? "google" : host;
+            medium = medium || "referral";
+          }
+        } catch (_) {}
+      }
+      if (source && gateway.test(source)) source = null;
+      return { source: browser !== "browser" ? browser : source || "direct", utm_source: source, utm_medium: medium,
+        utm_campaign: normalize(params.get("utm_campaign")), utm_content: normalize(params.get("utm_content")),
+        explicit: !!normalize(params.get("utm_source")) && !gateway.test(normalize(params.get("utm_source"))) };
+    }
+    var lastProcessedUtm = null;
+    if (handedStore === storeId && /^[\w-]{1,100}$/.test(handedSession || "")) {
+      memorySession = { id: handedSession, expiresAt: Date.now() + 1800000, source: normalize(initialParams.get("st_source")) || "direct",
+        utm_source: normalize(initialParams.get("st_source")), utm_medium: normalize(initialParams.get("st_medium")),
+        utm_campaign: normalize(initialParams.get("st_campaign")), utm_content: normalize(initialParams.get("st_content")) };
+      write("session", memorySession);
+    }
+    function session(allowIncoming) {
+      var now = Date.now();
+      var saved = read("session") || memorySession;
+      var incomingSource = allowIncoming ? incoming() : null;
+      var arriving = incomingSource && incomingSource.explicit && incomingSource.utm_source !== lastProcessedUtm;
+      var changed = saved && arriving && incomingSource.utm_source !== saved.utm_source;
+      if (incomingSource) lastProcessedUtm = incomingSource.explicit ? incomingSource.utm_source : null;
+      if (!saved || typeof saved.id !== "string" || !saved.id || typeof saved.source !== "string" || !Number.isFinite(saved.expiresAt) || saved.expiresAt <= now || changed) {
+        var source = incomingSource || incoming();
+        saved = { id: crypto.randomUUID(), expiresAt: now + 1800000, source: source.source,
+          utm_source: source.utm_source, utm_medium: source.utm_medium, utm_campaign: source.utm_campaign, utm_content: source.utm_content };
+      }
+      saved.expiresAt = now + 1800000; memorySession = saved; write("session", saved);
+      if (window.StoreTracker) window.StoreTracker.sessionId = saved.id;
+      return saved;
+    }
+    function context(allowIncoming) {
+      var saved = session(allowIncoming);
+      return { storeId: storeId, sessionId: saved.id, visitorId: visitorId, source: saved.source,
+        utm_source: saved.utm_source, utm_medium: saved.utm_medium, utm_campaign: saved.utm_campaign, utm_content: saved.utm_content,
+        browser: browser, userAgent: ua };
+    }
+    // Each event has its own storage key, so tabs cannot overwrite each other's
+    // pending events. Replayed events are safe because their IDs stay unchanged.
+    var queue = [];
+    try {
+      var outboxPrefix = prefix + "outbox:";
+      var keys = [];
+      for (var i = 0; i < localStorage.length; i++) keys.push(localStorage.key(i));
+      keys.forEach(function (key) {
+        if (!key || key.indexOf(outboxPrefix) !== 0) return;
+        var event = JSON.parse(localStorage.getItem(key));
+        if (event && event.args && event.args.storeId === storeId && Date.now() - event.createdAt < 86400000) queue.push(event);
+        else localStorage.removeItem(key);
+      });
+      queue.sort(function (a, b) { return a.createdAt - b.createdAt; });
+      while (queue.length > 100) localStorage.removeItem(prefix + "outbox:" + queue.shift().args.eventId);
+    } catch (_) {}
+    var running = false;
+    var retryTimer;
+    var waiters = {};
+    function persist() { queue.forEach(function (event) { write("outbox:" + event.args.eventId, event); }); }
+    function forget(event) { try { localStorage.removeItem(prefix + "outbox:" + event.args.eventId); } catch (_) {} }
+    async function drain() {
+      if (running || !queue.length) return;
+      running = true;
+      while (queue.length) {
+        var event = queue[0];
+        try {
+          var response = await fetch(endpoint.replace(/\/$/, "") + "/api/mutation", { method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ path: "tracking:" + event.name, args: event.args, format: "json" }), keepalive: true,
+            signal: typeof AbortSignal !== "undefined" && AbortSignal.timeout ? AbortSignal.timeout(8000) : undefined });
+          var result = await response.json();
+          if (!response.ok || result.status !== "success") {
+            // Bad payloads must not block the rest of the queue.
+            if ((result.status === "error" && /ArgumentValidationError|Invalid|Items must|Missing store/.test(result.errorMessage || "")) || (response.status >= 400 && response.status < 500)) { queue.shift(); forget(event); persist(); if (waiters[event.args.eventId]) waiters[event.args.eventId](null); continue; }
+            throw new Error("Send failed");
+          }
+          queue.shift(); forget(event); persist();
+          if (waiters[event.args.eventId]) { waiters[event.args.eventId](result.value); delete waiters[event.args.eventId]; }
+        } catch (_) {
+          Object.keys(waiters).forEach(function (id) { waiters[id](null); delete waiters[id]; });
+          clearTimeout(retryTimer); retryTimer = setTimeout(drain, 5000); break;
+        }
+      }
+      running = false;
+    }
+    function send(name, args) {
+      var event = { name: name, args: Object.assign(context(name === "visit"), args, { eventId: crypto.randomUUID() }), createdAt: Date.now() };
+      if (queue.length >= 100) { var removed = queue.shift(); forget(removed); if (waiters[removed.args.eventId]) waiters[removed.args.eventId](null); }
+      queue.push(event); persist();
+      var promise = new Promise(function (resolve) { waiters[event.args.eventId] = resolve; });
+      drain(); return promise;
+    }
+    function pageView() { return send("visit", { pageUrl: cleanUrl(location.href), eventName: "page_view" }); }
+    function decorateCheckoutUrl(value) {
+      try {
+        var url = new URL(value, location.href);
+        if (!["https:", "http:"].includes(url.protocol) || checkoutHosts.indexOf(url.hostname.toLowerCase()) < 0) return value;
+        var saved = session(false);
+        var carry = { st_store: storeId, st_sid: saved.id, st_vid: visitorId, st_source: saved.source,
+          st_medium: saved.utm_medium, st_campaign: saved.utm_campaign, st_content: saved.utm_content };
+        Object.keys(carry).forEach(function (key) { if (carry[key]) url.searchParams.set(key, carry[key]); });
+        return url.href;
+      } catch (_) { return value; }
+    }
+    window.StoreTracker = {
+      sessionId: session(true).id, ready: pageView(), decorateCheckoutUrl: decorateCheckoutUrl,
+      trackEvent: function (name) { if (name !== "add_to_cart" && name !== "begin_checkout") return noop(); return send("visit", { pageUrl: cleanUrl(location.href), eventName: name }); },
+      trackOrder: function (order) {
+        try {
+          // Preferred contract: net merchandise value and item prices in whole paise.
+          var amount = order.orderValuePaise;
+          if (amount == null) amount = Math.round((Number(order.orderValue) - Number(order.shippingValue || 0)) * 100);
+          var items = order.items;
+          if (!items && order.productNames && order.productNames.length === 1) items = [{ name: order.productNames[0], quantity: 1, pricePaise: amount }];
+          if (!Number.isSafeInteger(amount) || amount < 0 || !Array.isArray(items)) return noop();
+          var payload = { orderValue: amount, currency: (order.currency || "INR").toUpperCase(), items: items.map(function (item) { return { name: item.name, quantity: item.quantity, pricePaise: item.pricePaise }; }),
+            paymentMethod: order.paymentMethod, couponCode: order.couponCode || null, isTest: order.isTest === true || settings.testMode === "true" || /^(localhost|127\.0\.0\.1)$/.test(location.hostname), isStaff: order.isStaff === true || settings.staffMode === "true" };
+          if (typeof order.orderId === "string" && order.orderId.trim()) payload.orderId = order.orderId.trim();
+          return send("order", payload);
+        } catch (_) { return noop(); }
+      },
+    };
+    if (window.storeTrackerOrder) window.StoreTracker.orderReady = window.StoreTracker.trackOrder(window.storeTrackerOrder);
+    var lastUrl = location.href;
+    function navigation() { if (location.href !== lastUrl) { lastUrl = location.href; pageView(); } }
+    ["pushState", "replaceState"].forEach(function (name) {
+      var original = history[name]; history[name] = function () { var result = original.apply(this, arguments); navigation(); return result; };
     });
-    var result = await response.json();
-    if (!response.ok || result.status !== "success") throw new Error(result.errorMessage || "Tracking failed");
-    return result.value;
-  }
-
-  var params = new URLSearchParams(location.search);
-  var visit = { sessionId: session(), pageUrl: location.href, time: Date.now() };
-  ["utm_source", "utm_medium", "utm_campaign", "utm_content"].forEach(function (name) {
-    visit[name] = params.get(name);
-  });
-  var ready = send("visit", visit);
-  // Keep a rejected request observable without an unhandled rejection.
-  ready.catch(function (error) { console.error("Visit tracking:", error); });
-  window.StoreTracker = {
-    ready: ready,
-    sessionId: visit.sessionId,
-    trackOrder: async function (order) {
-      await ready;
-      var payload = {
-        sessionId: session(), orderValue: order.orderValue,
-        productNames: order.productNames, paymentMethod: order.paymentMethod, time: Date.now(),
-      };
-      if (typeof order.orderId === "string" && order.orderId.trim()) payload.orderId = order.orderId.trim();
-      return send("order", payload);
-    },
-  };
-  if (window.storeTrackerOrder) {
-    window.StoreTracker.orderReady = window.StoreTracker.trackOrder(window.storeTrackerOrder);
-    window.StoreTracker.orderReady.catch(function (error) { console.error("Order tracking:", error); });
-  }
+    window.addEventListener("popstate", navigation);
+    window.addEventListener("hashchange", navigation);
+    window.addEventListener("pageshow", function (event) { if (event.persisted) { lastUrl = location.href; pageView(); } });
+    window.addEventListener("online", drain);
+    document.addEventListener("click", function (event) {
+      var link = event.target.closest && event.target.closest("a[href]");
+      if (link) link.href = decorateCheckoutUrl(link.href);
+    }, true);
+    document.addEventListener("submit", function (event) {
+      var form = event.target;
+      if (form && form.action) {
+        var decorated = decorateCheckoutUrl(form.action);
+        if (form.method.toLowerCase() === "get") {
+          var url = new URL(decorated);
+          url.searchParams.forEach(function (value, key) {
+            if (key.indexOf("st_") !== 0) return;
+            var input = form.querySelector('input[name="' + key + '"]');
+            if (!input) { input = document.createElement("input"); input.type = "hidden"; input.name = key; form.appendChild(input); }
+            input.value = value;
+          });
+        } else form.action = decorated;
+      }
+    }, true);
+    var visibleSince = document.visibilityState === "visible" ? performance.now() : null;
+    function heartbeat() {
+      if (visibleSince === null) return;
+      var now = performance.now(); var elapsed = Math.min(15000, Math.max(0, now - visibleSince)); visibleSince = now;
+      if (elapsed) send("heartbeat", { elapsedMs: elapsed });
+    }
+    setInterval(function () { if (document.visibilityState === "visible") heartbeat(); navigation(); }, 15000);
+    document.addEventListener("visibilitychange", function () {
+      if (document.visibilityState === "hidden") { heartbeat(); visibleSince = null; flush(); }
+      else { visibleSince = performance.now(); drain(); }
+    });
+    function flush() {
+      persist();
+      if (!navigator.sendBeacon) return;
+      queue.forEach(function (event) {
+        try { navigator.sendBeacon(endpoint.replace(/\/$/, "") + "/api/mutation", new Blob([JSON.stringify({ path: "tracking:" + event.name, args: event.args, format: "json" })], { type: "application/json" })); } catch (_) {}
+      });
+    }
+    window.addEventListener("pagehide", function () { heartbeat(); flush(); });
+  } catch (_) { window.StoreTracker = disabled; }
 })();
