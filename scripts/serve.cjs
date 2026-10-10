@@ -6,6 +6,12 @@ http.createServer((req, res) => {
   const pathname = new URL(req.url, 'http://localhost').pathname;
   if (pathname === '/chasma-kart/' || pathname === '/chasma-kart') { res.writeHead(302, { Location: '/chasma-kart/index.html' + new URL(req.url, 'http://localhost').search }); return res.end(); }
   let file = { '/': 'test.html', '/test.html': 'test.html', '/thank-you.html': 'thank-you.html', '/tracker.js': 'tracker.js' }[pathname];
+  if (/^\/founder\/(index\.html|screen\.(js|css))$/.test(pathname)) {
+    const built = path.join(__dirname, '../dist', pathname);
+    if (!fs.existsSync(built)) { res.writeHead(404); return res.end('Build the founder screen first.'); }
+    res.setHeader('Content-Type', pathname.endsWith('.js') ? 'text/javascript' : pathname.endsWith('.css') ? 'text/css' : 'text/html');
+    return res.end(fs.readFileSync(built));
+  }
   if (pathname.startsWith('/chasma-kart/')) {
     const candidate = path.resolve(root, '.' + pathname);
     if (candidate.startsWith(root + path.sep) && fs.existsSync(candidate) && fs.statSync(candidate).isFile()) file = path.relative(root, candidate);

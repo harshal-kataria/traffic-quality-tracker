@@ -24,3 +24,7 @@ for (const page of ['cart', 'checkout', 'thank-you', 'product/jet-black', 'produ
   fs.mkdirSync(path.dirname(destination), { recursive: true });
   fs.writeFileSync(destination, html);
 }
+const founder = path.join(output, 'founder');
+fs.mkdirSync(founder, { recursive: true });
+for (const file of ['index.html', 'screen.css']) fs.copyFileSync(path.join(root,'founder',file),path.join(founder,file));
+require('esbuild').buildSync({ entryPoints:[path.join(root,'founder/screen.jsx')], bundle:true, minify:true, outfile:path.join(founder,'screen.js'), define:{'process.env.FOUNDER_CONVEX_URL':JSON.stringify(url),'process.env.NODE_ENV':'"production"'}, jsx:'automatic' });

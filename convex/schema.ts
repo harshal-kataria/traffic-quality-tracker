@@ -1,9 +1,12 @@
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
+import { authTables } from "@convex-dev/auth/server";
 
 const attribution = v.object({ source: v.string(), medium: v.union(v.string(), v.null()), campaign: v.union(v.string(), v.null()), content: v.union(v.string(), v.null()), time: v.number() });
 const status = v.union(v.literal("unconfirmed"), v.literal("paid"), v.literal("delivered"), v.literal("cancelled"), v.literal("refunded"));
 export default defineSchema({
+  ...authTables,
+  founderStores: defineTable({ userId: v.id("users"), storeId: v.string() }).index("by_user", ["userId"]),
   visits: defineTable({
     sessionId: v.string(), pageUrl: v.string(),
     utm_source: v.union(v.string(), v.null()), utm_medium: v.union(v.string(), v.null()),
@@ -12,7 +15,7 @@ export default defineSchema({
     eventName: v.optional(v.union(v.literal("page_view"), v.literal("add_to_cart"), v.literal("begin_checkout"))),
     source: v.optional(v.string()), sessionStartedAt: v.optional(v.number()), sessionDay: v.optional(v.string()),
     browser: v.optional(v.string()),
-  }).index("by_session", ["sessionId"]).index("by_store_session", ["storeId", "sessionId"])
+  }).index("by_store_time", ["storeId", "time"]).index("by_session", ["sessionId"]).index("by_store_session", ["storeId", "sessionId"])
     .index("by_store_event", ["storeId", "eventId"]).index("by_time", ["time"]),
   orders: defineTable({
     orderId: v.optional(v.string()), sessionId: v.string(), orderValue: v.number(), productNames: v.array(v.string()),
@@ -23,7 +26,7 @@ export default defineSchema({
     isTest: v.optional(v.boolean()), isStaff: v.optional(v.boolean()), excludedFromMetrics: v.optional(v.boolean()),
     source: v.optional(v.string()), attribution: v.optional(v.union(attribution, v.null())),
     sessionStartedAt: v.optional(v.number()), sessionDay: v.optional(v.string()), statusUpdatedAt: v.optional(v.number()),
-  }).index("by_session", ["sessionId"]).index("by_store_session", ["storeId", "sessionId"])
+  }).index("by_store_time", ["storeId", "time"]).index("by_session", ["sessionId"]).index("by_store_session", ["storeId", "sessionId"])
     .index("by_store_order", ["storeId", "orderId"]).index("by_store_event", ["storeId", "eventId"])
     .index("by_store_session_value", ["storeId", "sessionId", "orderValue", "currency"]),
   sessions: defineTable({ storeId: v.string(), sessionId: v.string(), startedAt: v.number(), sessionDay: v.string(),

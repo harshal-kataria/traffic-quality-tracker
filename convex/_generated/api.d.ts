@@ -8,7 +8,11 @@
  * @module
  */
 
+import type * as auth from "../auth.js";
 import type * as crons from "../crons.js";
+import type * as founder from "../founder.js";
+import type * as founderMath from "../founderMath.js";
+import type * as http from "../http.js";
 import type * as tracking from "../tracking.js";
 
 import type {
@@ -18,7 +22,11 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  auth: typeof auth;
   crons: typeof crons;
+  founder: typeof founder;
+  founderMath: typeof founderMath;
+  http: typeof http;
   tracking: typeof tracking;
 }>;
 

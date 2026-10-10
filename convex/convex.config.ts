@@ -1,9 +1,9 @@
 import { defineApp } from "convex/server";
 import staticHosting from "@convex-dev/static-hosting/convex.config";
 
-// Your own HTTP endpoints (convex/http.ts) are served under /api so the
-// static site can own the root.
-const app = defineApp({ httpPrefix: "/api" });
-app.use(staticHosting, { httpPrefix: "/" });
+// Convex Auth requires root discovery routes. The app router serves those
+// exact routes and delegates static files to the existing hosting component.
+const app = defineApp();
+app.use(staticHosting);
 
 export default app;

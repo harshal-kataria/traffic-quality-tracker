@@ -5,3 +5,7 @@ dist/
 .env.*
 .local-convex/
 .convex/
+.founder-access.json
+.auth-keys.json
+.founder-proof.json
+.founder-local/
