@@ -4,10 +4,18 @@ const path = require('node:path');
 const root = path.resolve(__dirname, '../public');
 http.createServer((req, res) => {
   const pathname = new URL(req.url, 'http://localhost').pathname;
-  const file = { '/': 'test.html', '/test.html': 'test.html', '/thank-you.html': 'thank-you.html', '/tracker.js': 'tracker.js' }[pathname];
+  if (pathname === '/chasma-kart/' || pathname === '/chasma-kart') { res.writeHead(302, { Location: '/chasma-kart/index.html' + new URL(req.url, 'http://localhost').search }); return res.end(); }
+  let file = { '/': 'test.html', '/test.html': 'test.html', '/thank-you.html': 'thank-you.html', '/tracker.js': 'tracker.js' }[pathname];
+  if (pathname.startsWith('/chasma-kart/')) {
+    const candidate = path.resolve(root, '.' + pathname);
+    if (candidate.startsWith(root + path.sep) && fs.existsSync(candidate) && fs.statSync(candidate).isFile()) file = path.relative(root, candidate);
+    else if (/^\/chasma-kart\/(?:cart|checkout|thank-you|product\/[a-z-]+)\.html$/.test(pathname)) file = 'chasma-kart/index.html';
+  }
   if (!file) { res.writeHead(404); return res.end('Not found'); }
-  let content = fs.readFileSync(path.join(root, file), 'utf8');
-  content = content.replaceAll('__CONVEX_URL__', 'http://127.0.0.1:3210');
-  res.setHeader('Content-Type', file.endsWith('.js') ? 'text/javascript' : 'text/html');
+  const extension = path.extname(file);
+  let content = fs.readFileSync(path.join(root, file));
+  if (extension === '.html' || extension === '.js') content = content.toString().replaceAll('__CONVEX_URL__', process.env.TRACKING_CONVEX_URL || 'http://127.0.0.1:3210');
+  if (extension === '.html' && process.env.TRACKING_CONVEX_URL?.includes('pleasant-bee-1')) content = content.replaceAll('/dusty-dogfish-660', '/pleasant-bee-1');
+  res.setHeader('Content-Type', {'.js':'text/javascript', '.css':'text/css', '.html':'text/html', '.woff2':'font/woff2'}[extension] || 'text/plain');
   res.end(content);
-}).listen(8080, '127.0.0.1', () => console.log('Test store: http://127.0.0.1:8080/test.html'));
+}).listen(Number(process.env.PORT || 8080), '127.0.0.1', () => console.log('ChasmaKart: http://127.0.0.1:' + (process.env.PORT || 8080) + '/chasma-kart/index.html'));

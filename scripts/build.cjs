@@ -15,3 +15,12 @@ for (const name of ['test.html', 'thank-you.html', 'tracker.js']) {
   if (name === 'test.html') fs.writeFileSync(path.join(output, 'index.html'), content);
 }
 console.log('Built static test pages with the public Convex client URL.');
+const store = path.join(output, 'chasma-kart');
+fs.cpSync(path.join(root, 'public/chasma-kart'), store, { recursive: true });
+const html = fs.readFileSync(path.join(store, 'index.html'), 'utf8').replaceAll('__CONVEX_URL__', url);
+fs.writeFileSync(path.join(store, 'index.html'), html);
+for (const page of ['cart', 'checkout', 'thank-you', 'product/jet-black', 'product/sunset-club', 'product/coastline', 'product/golden-hour', 'product/cloud-nine', 'product/weekender']) {
+  const destination = path.join(store, page + '.html');
+  fs.mkdirSync(path.dirname(destination), { recursive: true });
+  fs.writeFileSync(destination, html);
+}
