@@ -9,8 +9,10 @@ async function report(ctx: QueryCtx, storeId: string) {
   const until = Date.now();
   const from = until - 30 * 86400000;
   // Bound reads to this store and the reporting window.
-  const visits = await ctx.db.query("visits").withIndex("by_store_time", q => q.eq("storeId", storeId).gte("time", from).lte("time", until)).take(10001);
-  const orders = await ctx.db.query("orders").withIndex("by_store_time", q => q.eq("storeId", storeId).gte("time", from).lte("time", until)).take(10001);
+  // No upper timestamp bound: a cached query must include newly inserted rows
+  // in its index dependency, otherwise live visits and orders cannot invalidate it.
+  const visits = await ctx.db.query("visits").withIndex("by_store_time", q => q.eq("storeId", storeId).gte("time", from)).take(10001);
+  const orders = await ctx.db.query("orders").withIndex("by_store_time", q => q.eq("storeId", storeId).gte("time", from)).take(10001);
   if (visits.length > 10000 || orders.length > 10000) throw new Error("This store exceeds the current report limit. No partial totals are shown.");
   return { storeId, from, until, ...summarize(visits, orders) };
 }
