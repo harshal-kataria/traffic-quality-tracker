@@ -1,0 +1,11 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tracking test store</title>
+<body><h1>Tracking test store</h1><p>Sample product: Traveler Backpack — ₹1,499</p>
+<p id="status">Saving visit…</p>
+<form action="/thank-you.html"><label for="payment">Payment method</label>
+<select id="payment" name="payment"><option value="prepaid">Prepaid</option><option value="COD">COD</option></select>
+<button type="submit">Open fake thank-you page</button></form>
+<script src="/tracker.js" data-convex-url="__CONVEX_URL__"></script>
+<script>StoreTracker.ready.then(() => { document.getElementById('status').textContent = 'Visit saved. Session: ' + StoreTracker.sessionId; }).catch(e => { document.getElementById('status').textContent = e.message; });</script>
+</body></html>

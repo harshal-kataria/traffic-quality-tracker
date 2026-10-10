@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fake order thank-you page</title>
+<body><h1>Thank you for your test order</h1><p>Traveler Backpack — ₹1,499</p>
+<form><label for="payment">Payment method</label><select id="payment" name="payment"><option value="prepaid">Prepaid</option><option value="COD">COD</option></select><button type="submit">Load thank-you page with this payment</button></form>
+<p id="status">Saving visit and order…</p><a href="/test.html">Back to test store</a>
+<script>
+var payment = new URLSearchParams(location.search).get('payment') || 'prepaid';
+document.getElementById('payment').value = payment;
+window.storeTrackerOrder = { orderValue: 1499, productNames: ['Traveler Backpack'], paymentMethod: payment };
+</script>
+<script src="/tracker.js" data-convex-url="__CONVEX_URL__"></script>
+<script>StoreTracker.orderReady.then(() => { document.getElementById('status').textContent = payment + ' order saved. Session: ' + StoreTracker.sessionId; }).catch(e => { document.getElementById('status').textContent = e.message; });</script>
+</body></html>
