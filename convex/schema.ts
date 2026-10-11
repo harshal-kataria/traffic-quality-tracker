@@ -6,7 +6,14 @@ const attribution = v.object({ source: v.string(), medium: v.union(v.string(), v
 const status = v.union(v.literal("unconfirmed"), v.literal("paid"), v.literal("delivered"), v.literal("cancelled"), v.literal("refunded"));
 export default defineSchema({
   ...authTables,
-  founderStores: defineTable({ userId: v.id("users"), storeId: v.string() }).index("by_user", ["userId"]),
+  founderStores: defineTable({ userId: v.id("users"), storeId: v.string() }).index("by_user", ["userId"]).index("by_store", ["storeId"]),
+  trafficAlerts: defineTable({ storeId: v.string(), key: v.string(), day: v.string(), createdAt: v.number(),
+    page: v.string(), source: v.string(), previousAverage: v.number(), currentVisits: v.number(), dropPercent: v.number(),
+  }).index("by_store_key", ["storeId", "key"]).index("by_store_created", ["storeId", "createdAt"]),
+  alertChecks: defineTable({ storeId: v.string(), checkedAt: v.number(), day: v.string(),
+    status: v.union(v.literal("warming_up"), v.literal("ready"), v.literal("over_limit")),
+    count: v.number(),
+  }).index("by_store", ["storeId"]),
   visits: defineTable({
     sessionId: v.string(), pageUrl: v.string(),
     utm_source: v.union(v.string(), v.null()), utm_medium: v.union(v.string(), v.null()),

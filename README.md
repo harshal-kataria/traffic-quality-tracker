@@ -123,7 +123,32 @@ Privacy-policy notice founders can add:
 
 Safari storage clearing can undercount returning browser visitors and break
 longer attribution history. No repeat-customer classification is added here.
-No dashboard, alerts, ad integration, scroll tracking or recommendations exist.
+A private founder screen at `/founder/index.html` shows products and sessions by
+traffic source, session time, and conversion rates. Ad integrations, scroll
+tracking, recommendations, and forecasting are not implemented.
+
+### Traffic-drop alerts
+
+Convex checks each founder's store daily at 9am IST. The founder screen also has
+“Check now.” It compares yesterday's page views for each page/source pair with
+the daily average of the seven complete days before yesterday. URL parameters
+do not create separate pages. A drop qualifies only at 30% or more, with a prior
+average of at least 20 visits and at least five visits lost. The check waits for
+eight complete days of history. One alert is saved per store/day/page/source,
+even if the check runs again. The screen shows the latest 50 saved alerts.
+
+Sessions linked to flagged test or staff orders are excluded from alert
+comparisons. Test browsing without a flagged order cannot yet be identified.
+Each check reads at most 10,001 visits and orders; exceeding 10,000 stops the
+comparison and shows a limit message instead of reporting partial numbers.
+Checks and inbox access use the signed-in founder's store, never a browser
+supplied store ID. Alert checks do not change visit or order recording.
+
+Alerts currently appear on the founder screen. Email delivery is not enabled;
+an email service requires the founder's approval and setup. No email-service
+key is in the code. Development-only proof: `npx convex run alerts:verify '{}'`
+checks a 50% drop, duplicate checks, store isolation, and removes its synthetic
+rows in the same transaction. It refuses to run on production.
 
 ## Checks
 
