@@ -14,8 +14,32 @@
     var checkoutHosts = (settings.checkoutHosts || "").split(",").map(function (host) { return host.trim().toLowerCase(); }).filter(Boolean);
     var storeHosts = (settings.storeHosts || location.hostname).split(",").map(function (host) { return host.trim().toLowerCase(); });
     var initialParams = new URL(location.href).searchParams;
-    function read(key) { try { return JSON.parse(localStorage.getItem(prefix + key)); } catch (_) { return null; } }
-    function write(key, value) { try { localStorage.setItem(prefix + key, JSON.stringify(value)); } catch (_) {} }
+    function read(key) {
+      var local = null, cookie = null;
+      try { local = JSON.parse(localStorage.getItem(prefix + key)); } catch (_) {}
+      if (key === "session" || key === "visitor") {
+        try {
+          var name = encodeURIComponent(prefix + key) + "=";
+          (document.cookie || "").split(";").some(function (part) {
+            part = part.trim();
+            if (part.indexOf(name) !== 0) return false;
+            cookie = JSON.parse(decodeURIComponent(part.slice(name.length))); return true;
+          });
+        } catch (_) {}
+      }
+      if (key === "session" && cookie && local) return cookie.expiresAt > local.expiresAt ? cookie : local;
+      return local || cookie;
+    }
+    function write(key, value) {
+      try { localStorage.setItem(prefix + key, JSON.stringify(value)); } catch (_) {}
+      if (key === "session" || key === "visitor") {
+        try {
+          var age = key === "session" ? Math.max(0, Math.ceil((value.expiresAt - Date.now()) / 1000)) : 31536000;
+          document.cookie = encodeURIComponent(prefix + key) + "=" + encodeURIComponent(JSON.stringify(value)) +
+            "; Path=/; SameSite=Lax; Max-Age=" + age + (new URL(location.href).protocol === "https:" ? "; Secure" : "");
+        } catch (_) {}
+      }
+    }
     if (initialParams.get("notrack") === "1") write("disabled", true);
     if (!endpoint || !storeId || read("disabled") || initialParams.get("notrack") === "1" || /bot\b|crawler|spider|headless|lighthouse|facebookexternalhit|preview|slurp/i.test(ua)) {
       window.StoreTracker = disabled; return;
@@ -26,8 +50,7 @@
     var handedSession = initialParams.get("st_sid");
     var handedVisitor = initialParams.get("st_vid");
     var handedStore = initialParams.get("st_store");
-    if (handedStore === storeId && /^[\w-]{1,100}$/.test(handedVisitor || "")) visitorId = handedVisitor;
-    write("visitor", visitorId);
+    if (handedStore === storeId && /^[\w-]{1,100}$/.test(handedVisitor || "")) { visitorId = handedVisitor; write("visitor", visitorId); }
     function normalize(value) {
       var result = (value || "").trim().toLowerCase().slice(0, 200);
       return /[^\s@]+@[^\s@]+\.[^\s@]+|\+?\d[\d ().-]{6,}\d/.test(result) ? null : result || null;
@@ -48,7 +71,6 @@
       var medium = normalize(params.get("utm_medium"));
       if (!source && params.has("fbclid")) { source = browser === "instagram_app" ? "instagram" : "facebook"; medium = medium || "paid_social"; }
       if (!source && params.has("gclid")) { source = "google"; medium = medium || "cpc"; }
-      if (!source && browser !== "browser") source = browser;
       if (!source && document.referrer) {
         try {
           var host = new URL(document.referrer).hostname.toLowerCase();
@@ -59,7 +81,8 @@
         } catch (_) {}
       }
       if (source && gateway.test(source)) source = null;
-      return { source: browser !== "browser" ? browser : source || "direct", utm_source: source, utm_medium: medium,
+      if (!source && browser !== "browser") source = browser;
+      return { source: source || "direct", utm_source: source, utm_medium: medium,
         utm_campaign: normalize(params.get("utm_campaign")), utm_content: normalize(params.get("utm_content")),
         explicit: !!normalize(params.get("utm_source")) && !gateway.test(normalize(params.get("utm_source"))) };
     }
@@ -70,9 +93,16 @@
         utm_campaign: normalize(initialParams.get("st_campaign")), utm_content: normalize(initialParams.get("st_content")) };
       write("session", memorySession);
     }
-    function session(allowIncoming) {
+    function session(allowIncoming, refreshActivity) {
       var now = Date.now();
       var saved = read("session") || memorySession;
+      // Time pings measure visibility, not human activity. They must neither
+      // renew an idle session nor create a new one without a page view.
+      if (refreshActivity === false && (!saved || !saved.id || !Number.isFinite(saved.expiresAt) || saved.expiresAt <= now)) return null;
+      if (refreshActivity === false) {
+        if (window.StoreTracker) window.StoreTracker.sessionId = saved.id;
+        return saved;
+      }
       var incomingSource = allowIncoming ? incoming() : null;
       var arriving = incomingSource && incomingSource.explicit && incomingSource.utm_source !== lastProcessedUtm;
       var changed = saved && arriving && incomingSource.utm_source !== saved.utm_source;
@@ -82,12 +112,17 @@
         saved = { id: crypto.randomUUID(), expiresAt: now + 1800000, source: source.source,
           utm_source: source.utm_source, utm_medium: source.utm_medium, utm_campaign: source.utm_campaign, utm_content: source.utm_content };
       }
-      saved.expiresAt = now + 1800000; memorySession = saved; write("session", saved);
+      if (refreshActivity !== false) saved.expiresAt = now + 1800000;
+      memorySession = saved; write("session", saved);
       if (window.StoreTracker) window.StoreTracker.sessionId = saved.id;
       return saved;
     }
-    function context(allowIncoming) {
-      var saved = session(allowIncoming);
+    function context(allowIncoming, refreshActivity) {
+      var saved = session(allowIncoming, refreshActivity);
+      if (!saved) return null;
+      // Initialise under the same cross-tab lock as the session.
+      visitorId = read("visitor") || visitorId;
+      if (refreshActivity !== false) write("visitor", visitorId);
       return { storeId: storeId, sessionId: saved.id, visitorId: visitorId, source: saved.source,
         utm_source: saved.utm_source, utm_medium: saved.utm_medium, utm_campaign: saved.utm_campaign, utm_content: saved.utm_content,
         browser: browser, userAgent: ua };
@@ -137,12 +172,27 @@
       }
       running = false;
     }
-    function send(name, args) {
-      var event = { name: name, args: Object.assign(context(name === "visit"), args, { eventId: crypto.randomUUID() }), createdAt: Date.now() };
+    function shared(task) {
+      // Web Locks serialises session creation across same-origin tabs. The
+      // lock is released after enqueueing, without waiting for the network.
+      if (navigator.locks && navigator.locks.request) return navigator.locks.request(prefix + "session", task);
+      return Promise.resolve(task());
+    }
+    function enqueue(name, args, allowIncoming) {
+      var details = context(allowIncoming == null ? name === "visit" : allowIncoming, name !== "heartbeat");
+      if (!details) return { promise: noop() };
+      var event = { name: name, args: Object.assign(details, args, { eventId: crypto.randomUUID() }), createdAt: Date.now() };
       if (queue.length >= 100) { var removed = queue.shift(); forget(removed); if (waiters[removed.args.eventId]) waiters[removed.args.eventId](null); }
       queue.push(event); persist();
       var promise = new Promise(function (resolve) { waiters[event.args.eventId] = resolve; });
-      drain(); return promise;
+      drain(); return { promise: promise };
+    }
+    function send(name, args) {
+      // A final beat must be queued synchronously before pagehide flushes it.
+      // Heartbeats only read shared state, so they do not need a creation lock.
+      if (name === "heartbeat") { try { return enqueue(name, args).promise; } catch (_) { return noop(); } }
+      try { return shared(function () { return enqueue(name, args); }).then(function (result) { return result.promise; }).catch(function () { return null; }); }
+      catch (_) { return noop(); }
     }
     function pageView() { return send("visit", { pageUrl: cleanUrl(location.href), eventName: "page_view" }); }
     function decorateCheckoutUrl(value) {
@@ -157,7 +207,7 @@
       } catch (_) { return value; }
     }
     window.StoreTracker = {
-      sessionId: session(true).id, ready: pageView(), decorateCheckoutUrl: decorateCheckoutUrl,
+      sessionId: null, ready: Promise.resolve(null), decorateCheckoutUrl: decorateCheckoutUrl,
       trackEvent: function (name) { if (name !== "add_to_cart" && name !== "begin_checkout") return noop(); return send("visit", { pageUrl: cleanUrl(location.href), eventName: name }); },
       trackOrder: function (order) {
         try {
@@ -174,6 +224,7 @@
         } catch (_) { return noop(); }
       },
     };
+    window.StoreTracker.ready = pageView();
     if (window.storeTrackerOrder) window.StoreTracker.orderReady = window.StoreTracker.trackOrder(window.storeTrackerOrder);
     var lastUrl = location.href;
     function navigation() { if (location.href !== lastUrl) { lastUrl = location.href; pageView(); } }
@@ -184,6 +235,18 @@
     window.addEventListener("hashchange", navigation);
     window.addEventListener("pageshow", function (event) { if (event.persisted) { lastUrl = location.href; pageView(); } });
     window.addEventListener("online", drain);
+    function activity(event) {
+      if (event.isTrusted === false) return;
+      try {
+        shared(function () {
+          var previous = read("session") || memorySession;
+          var expired = !previous || !Number.isFinite(previous.expiresAt) || previous.expiresAt <= Date.now();
+          if (expired) return enqueue("visit", { pageUrl: cleanUrl(location.href), eventName: "page_view" }, false);
+          session(false); return { promise: noop() };
+        }).catch(function () {});
+      } catch (_) {}
+    }
+    ["pointerdown", "click", "keydown", "touchstart"].forEach(function (name) { document.addEventListener(name, activity, true); });
     document.addEventListener("click", function (event) {
       var link = event.target.closest && event.target.closest("a[href]");
       if (link) link.href = decorateCheckoutUrl(link.href);

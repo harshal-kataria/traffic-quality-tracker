@@ -86,14 +86,23 @@ async script loads, or from the store's later event handlers.
 - Store ID scopes browser state and every new database row. All database reads
   are internal and require a store ID. Founder login and dashboard access are
   outside this milestone; never expose these internal reads as public queries.
-- Session state is shared between tabs on the same origin and survives midnight.
-  It expires after 30 minutes of inactivity. A newly arriving UTM source starts
-  another session. The reporting day stays the IST day the session started.
+- Session state and the browser visitor ID use localStorage plus first-party,
+  host-only cookies. HTTPS cookies use Secure, SameSite=Lax and Path=/.
+  Tabs on the same origin share the session; Web Locks coordinate session
+  creation where supported, with best-effort storage sharing otherwise.
+  Cookies provide a fallback when localStorage is unavailable. Sessions survive
+  midnight and expire after 30 minutes without navigation or human interaction.
+  Visibility heartbeats do not renew that activity window or create sessions.
+  The next interaction after expiry records a page view in a new session.
+  A newly arriving UTM source starts another session. The reporting day stays
+  the IST day the session started. Different checkout origins still require the
+  existing checkout handoff; payment returns beyond expiry are not changed here.
 - Session attribution survives pages without UTMs. Orders use the last non-direct
   source seen for that store/browser visitor within 30 days. UTMs are lowercase
-  and trimmed. Missing sources use click IDs, in-app browser tags, external
-  referrers, then direct; self, configured checkout and gateway referrals are
-  ignored. Instagram/Facebook app browsers are also explicitly tagged.
+  and trimmed. Source priority is UTM, click ID, eligible external referrer,
+  in-app browser fallback, then direct. The browser tag is separate from source:
+  an Instagram webview with utm_source=google is credited to google and tagged
+  instagram_app. Self, configured checkout and gateway referrals are ignored.
 - SPA URL changes and restored back/forward pages emit page views. Visible tabs
   ping every 15 seconds; shared server timing prevents double-counting overlapping
   tabs. Heartbeat retries are also protected from duplicates.
