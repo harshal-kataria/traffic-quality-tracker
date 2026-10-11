@@ -29,3 +29,17 @@ M1 - Tracks, measures all users and the behaviour. Sends alerts.
 M2 - Analyses the user behaviour
 M3 - gives recommendations
 M4 - Predicts behaviour
+
+
+Implementation scope — 11 October 2026
+M2: private, last-30-day session behaviour by source, campaign, landing page and
+visited product page, plus recent time-ordered shopper journeys. Uses existing data;
+no tracker/store changes. Product-page funnels describe whole sessions that viewed
+a page; the original product table retains per-item order-value allocation.
+M3: evidence-based rule recommendations for landing-page, cart, checkout and source
+patterns, with minimum sample sizes and concrete follow-up checks. No automatic ad
+changes, profit claims, AI generation or forecasting. M4 remains unimplemented.
+Alerts: yesterday vs day before yesterday and vs seven prior complete days' daily
+average, all in IST. Either baseline can trigger an alert.
+Email: Resend approved; requires founder-owned signup and private sender/key settings
+before live sending can be verified. No credentials in the repository.

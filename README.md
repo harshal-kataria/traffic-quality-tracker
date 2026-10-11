@@ -125,49 +125,75 @@ Safari storage clearing can undercount returning browser visitors and break
 longer attribution history. No repeat-customer classification is added here.
 A private founder screen at `/founder/index.html` shows products and sessions by
 traffic source, session time, and conversion rates. Ad integrations, scroll
-tracking, recommendations, and forecasting are not implemented.
+tracking and forecasting are not implemented. Rule-based recommendations are now available.
 
 ### Traffic-drop alerts
 
-Convex checks each founder's store daily at 9am IST. The founder screen also has
-“Check now.” It compares yesterday's page views for each page/source pair with
-the daily average of the seven complete days before yesterday. URL parameters
-do not create separate pages. A drop qualifies only at 30% or more, with a prior
-average of at least 20 visits and at least five visits lost. The check waits for
-eight complete days of history. One alert is saved per store/day/page/source,
-even if the check runs again. The screen shows the latest 50 saved alerts.
+The private founder screen checks daily at 9am IST, or through **Check now**.
+Yesterday's complete IST day is compared separately with the day before yesterday
+and the average of the seven complete days before yesterday (yesterday is excluded).
+Either comparison can trigger one alert per store/day/page/source. Each baseline
+must have at least 20 page views, with a drop of at least 30% and five lost page views.
+The two-day comparison works after two complete days of history; the seven-day
+comparison waits for eight complete days. No incomplete baseline is presented as zero.
+Queries and fragments are ignored when grouping pages. Both counts and percentage
+changes appear in the alert row. Negative drop percentages mean growth. A zero
+baseline has no percentage. The latest 50 saved alerts appear on screen.
 
-Sessions linked to flagged test or staff orders are excluded from alert
-comparisons. Test browsing without a flagged order cannot yet be identified.
-Each check reads at most 10,001 visits and orders; exceeding 10,000 stops the
-comparison and shows a limit message instead of reporting partial numbers.
-Checks and inbox access use the signed-in founder's store, never a browser
-supplied store ID. Alert checks do not change visit or order recording.
+Sessions linked to test or staff orders are excluded. Untagged test browsing cannot
+be identified. Each check has a 10,000-row limit; it refuses partial comparisons.
+Development-only proof: `npx convex run alerts:verify '{}'` seeds isolated temporary
+rows, checks both comparison windows and duplicate protection, then removes its rows
+inside the same transaction. No production tracking rows are created by this proof.
 
-Alerts currently appear on the founder screen. Email delivery is not enabled;
-an email service requires the founder's approval and setup. No email-service
-key is in the code. Development-only proof: `npx convex run alerts:verify '{}'`
-checks a 50% drop, duplicate checks, store isolation, and removes its synthetic
-rows in the same transaction. It refuses to run on production.
+### Behaviour analysis and recommendations (milestones 2 and 3)
 
-## Checks
+On `/founder/index.html`, **Behaviour analysis** uses the existing sessions, visits
+and orders from the last 30 days. Group by source, campaign, landing page or product
+page. Counts and rates use distinct sessions; money stays separated by currency.
+Campaign and landing-page attribution use the first observed page. Product rows
+count sessions that viewed that product page, with whole-session funnel actions
+and order value, not per-item conversion. Multi-product sessions appear more than
+once. The original products-by-source table still gives per-product item value.
+The latest 20 eligible journeys show up to 100 time-ordered events each.
 
-`npm run check` checks Convex types; `npm test` checks browser collection rules.
-With local Convex running:
+Known test/staff sessions are excluded from all new analysis. Cancelled/refunded
+purchases are excluded. Unconfirmed COD is recorded as a purchase; only paid or
+delivered orders qualify as confirmed. No ad costs or margins are available.
 
-```sh
-node --test tests/tracking.local.cjs tests/order-dedup.local.cjs
-```
+Recommendations are explicit rules, not generated AI or predictions:
+- Landing page: at least 100 sessions, under 2% added to cart.
+- Cart: at least 20 cart sessions, fewer than half also began checkout.
+- Checkout: at least 20 checkout sessions, fewer than 30% also purchased.
+- Source test: at least 100 sessions per compared source, five confirmed purchasing
+  sessions in the stronger source, conversion at least 1.5 times the other sources
+  and two percentage points higher. Advice asks to check costs and margin first.
+- Low source conversion: at least 100 sessions on both sides, confirmed purchase
+  rate below half that of other sufficiently sampled sources.
 
-These run the actual snippet in a browser test harness (not a real browser)
-and submit events to the real local Convex database. The test output includes
-raw saved visit and order rows, with test orders flagged.
+Every recommendation shows evidence, a check to try, and how to check its result.
+Weak samples show no advice. Rates describe co-occurring session actions, not proof
+of ordered funnel progression. They do not establish causes or profitable budgets.
+At most 20 recommendations are shown. Read limits reject partial analysis.
+Development-only saved-data proof: `npx convex run insights:verify '{}'`.
 
-To read rows locally, run from `.local-convex/`:
+### Morning email delivery (Resend)
 
-```sh
-../node_modules/.bin/convex run tracking:rowsForSession '{"storeId":"STORE_ID","sessionId":"SESSION_ID"}'
-```
+Email delivery has been approved, but is **not active until account/sender setup**.
+Create the Resend account, verify the sending domain for your sender address, then
+set these private variables in the production Convex dashboard:
 
-No API keys are in the snippet or repository. Browser-submitted telemetry is
-not an independently verified payment record.
+- `RESEND_API_KEY`: a Resend sending key.
+- `ALERT_EMAIL_FROM`: the verified sender address.
+- `ALERT_EMAIL_TO`: the founder's chosen recipient address.
+
+Never paste a key into source code or commit it. The current settings apply only
+ to `chasma-kart`; another store cannot use that founder recipient. Daily checks
+schedule one digest per day, including collecting-history/no-drop states. Manual
+**Check now** does not send an email. Failed sends retry twice, ten minutes apart.
+The saved payload and Resend idempotency key prevent duplicate sends; retries stop
+before the service's 24-hour duplicate-protection window expires. Sent means the
+provider accepted the message, not proof that it reached the inbox. Failed delivery
+status is visible on the founder screen. CLI-only status (does not expose secrets):
+`npx convex run --prod alertEmail:status '{"storeId":"chasma-kart","day":"YYYY-MM-DD"}'`.
+Once configured, `npx convex run --prod alerts:daily '{}'` runs the real daily flow.

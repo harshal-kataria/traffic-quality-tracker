@@ -34,3 +34,14 @@ test('known test/staff sessions, non-page events, UTMs, and window boundaries ca
   assert.equal(rows.length,1); assert.equal(rows[0].previousAverage,20); assert.equal(rows[0].currentVisits,0);
   assert.equal(trafficDrops(baseline(140).map(v=>({...v,sessionId:'staff'})),[{sessionId:'staff',isTest:true}],now).length,0);
 });
+test('day-before comparison can alert before a seven-day baseline is available',()=>{
+  const prior=Array.from({length:20},()=>visit(start-86400000));
+  const current=Array.from({length:14},()=>visit(start));
+  const rows=trafficDrops([...prior,...current],[],now,{dayBeforeReady:true,sevenDayReady:false});
+  assert.equal(rows.length,1);assert.equal(rows[0].dayBeforeVisits,20);assert.equal(rows[0].dayBeforeDropPercent,30);assert.equal(rows[0].averageDropPercent,null);
+});
+test('either baseline can trigger one combined alert and a zero baseline has no percentage',()=>{
+  const rows=trafficDrops([...baseline(140),...Array.from({length:40},()=>visit(start-86400000)),...Array.from({length:25},()=>visit(start))],[],now);
+  assert.equal(rows.length,1);assert.equal(rows[0].dayBeforeDropPercent,38);assert.equal(rows[0].averageDropPercent,3);
+  assert.equal(trafficDrops(baseline(140),[],now)[0].dayBeforeDropPercent,null);
+});
